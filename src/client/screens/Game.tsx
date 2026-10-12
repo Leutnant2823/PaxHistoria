@@ -3,7 +3,7 @@ import type { ServerConfig } from "../../shared/api";
 import { api } from "../api";
 import type { MapData } from "../game/mapdata";
 import type { GameEvent, GameState } from "../game/types";
-import { applyChange, applyEvent, countryName, formatDate, newId, ownerOf, regionsOf } from "../game/engine";
+import { applyChange, applyEvent, countryName, formatDate, migrateState, newId, ownerOf, regionsOf } from "../game/engine";
 import { chronicleDue, generateJump, jumpLabel, writeChronicle, type JumpPlan } from "../game/aitasks";
 import { persistGame, persistSnapshot } from "../game/persist";
 import { MapView, type MapMode } from "../components/MapView";
@@ -35,7 +35,7 @@ interface JumpRun {
 type SaveStatus = "saved" | "saving" | "error";
 
 export function Game({ initial, map, config, onExit }: Props) {
-  const [state, setState] = useState(initial);
+  const [state, setState] = useState(() => migrateState(initial));
   const stateRef = useRef(state);
   stateRef.current = state;
   const update = useCallback((fn: (s: GameState) => void) => {
@@ -244,7 +244,7 @@ export function Game({ initial, map, config, onExit }: Props) {
   }
 
   async function rewind(turn: number) {
-    const snap = await api.loadSnapshot<GameState>(state.id, turn);
+    const snap = migrateState(await api.loadSnapshot<GameState>(state.id, turn));
     await api.deleteSnapshotsAfter(state.id, turn);
     await persistGame(snap);
     loaded.current = false;

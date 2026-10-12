@@ -13,9 +13,9 @@ export const MODEL_PRESETS: Record<ProviderId, { id: string; label: string }[]> 
     { id: "claude-opus-5-5", label: "Claude Opus 5.5 (максимальная)" },
   ],
   gemini: [
-    { id: "gemini-flash-latest", label: "Gemini Flash (есть бесплатный лимит)" },
-    { id: "gemini-flash-lite-latest", label: "Gemini Flash-Lite (бесплатно, быстрее)" },
-    { id: "gemini-pro-latest", label: "Gemini Pro" },
+    { id: "gemini-flash-latest", label: "Gemini Flash (бесплатный дневной лимит)" },
+    { id: "gemini-flash-lite-latest", label: "Gemini Flash-Lite (бесплатно, лимит больше, качество ниже)" },
+    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash (бесплатный дневной лимит)" },
   ],
   openrouter: [
     { id: "deepseek/deepseek-chat-v3.1:free", label: "DeepSeek V3.1 (бесплатная версия)" },
@@ -23,8 +23,9 @@ export const MODEL_PRESETS: Record<ProviderId, { id: string; label: string }[]> 
     { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash через OpenRouter" },
   ],
   workersai: [
-    { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B (бесплатный лимит Cloudflare)" },
+    { id: "@cf/meta/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout (бесплатный лимит Cloudflare)" },
     { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", label: "Mistral Small 3.1 24B" },
+    { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B (короткий контекст, для коротких партий)" },
   ],
   mock: [{ id: "mock", label: "Тестовые ответы без ИИ" }],
 };
@@ -105,7 +106,7 @@ const CHANGE_SCHEMA = {
     country: { type: "string" },
     a: { type: "string" },
     b: { type: "string" },
-    status: { type: "string", enum: ["war", "alliance", "entente", "rival", "truce", "neutral"] },
+    status: { type: "string", enum: ["war", "alliance", "entente", "rival", "truce", "dominion", "neutral"] },
     name: { type: "string" },
     color: { type: "string" },
     leader: { type: "string" },
@@ -177,13 +178,18 @@ ${actions}${cheat}
 ЦЕЛЕВАЯ ДАТА: ${target}`;
 
   const maxTokens = days > 100 ? 24000 : 14000;
-  const text = await callAi(
-    ai(state, "jump", sys, [{ role: "user", content: user }], { maxTokens, schema: JUMP_SCHEMA }),
-    onProgress,
-    signal,
-  );
-  const parsed = parseJson<{ events?: unknown[] }>(text);
-  const events = sanitizeEvents(state, parsed.events ?? [], target);
+  const request = ai(state, "jump", sys, [{ role: "user", content: user }], { maxTokens, schema: JUMP_SCHEMA });
+  // Free models sometimes break the JSON; one silent retry fixes most of those cases.
+  let events: GameEvent[] = [];
+  for (let attempt = 0; attempt < 2 && !events.length; attempt++) {
+    const text = await callAi(request, onProgress, signal);
+    try {
+      const parsed = parseJson<{ events?: unknown[] } | unknown[]>(text);
+      events = sanitizeEvents(state, Array.isArray(parsed) ? parsed : parsed.events ?? [], target);
+    } catch (e) {
+      if (attempt === 1) throw e;
+    }
+  }
   if (!events.length) throw new Error("ИИ не вернул ни одного события. Попробуйте ещё раз.");
   return { events, target: plan.mode === "auto" ? events[events.length - 1].date : target };
 }

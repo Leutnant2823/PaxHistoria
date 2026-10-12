@@ -18,6 +18,11 @@ const OPENAI_COMPAT: Record<"gemini" | "openrouter", { url: string; key: (env: E
   },
 };
 
+/** Free fallback when Gemini's free quota runs out or no Gemini key is set. */
+const WORKERS_AI_FALLBACK = "@cf/meta/llama-4-scout-17b-16e-instruct";
+// Gemini answers 429 on an exhausted quota; 5xx when overloaded.
+const FALLBACK_STATUSES = new Set([429, 500, 502, 503, 504]);
+
 // Server-side refusal fallback ("default" routing) exists for these models.
 const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-opus-5"]);
 
@@ -31,10 +36,25 @@ export function availableProviders(env: Env): Record<ProviderId, boolean> {
   };
 }
 
-function streamResponse(body: ReadableStream | null, format: StreamFormat): Response {
+function streamResponse(body: ReadableStream | null, format: StreamFormat, extra: Record<string, string> = {}): Response {
   return new Response(body, {
-    headers: { "content-type": "text/event-stream; charset=utf-8", "x-stream-format": format, "cache-control": "no-store" },
+    headers: { "content-type": "text/event-stream; charset=utf-8", "x-stream-format": format, "cache-control": "no-store", ...extra },
   });
+}
+
+async function runWorkersAi(env: Env, req: AiRequest, model: string, maxTokens: number): Promise<ReadableStream> {
+  const run = (limit: number) =>
+    env.AI!.run(model as Parameters<Ai["run"]>[0], {
+      messages: [{ role: "system", content: systemWithSchema(req) }, ...req.messages],
+      max_tokens: limit,
+      stream: true,
+    } as never) as unknown as Promise<ReadableStream>;
+  // Output limits differ per model; retry with a smaller one if the first is rejected.
+  try {
+    return await run(Math.min(maxTokens, 8192));
+  } catch {
+    return await run(Math.min(maxTokens, 4096));
+  }
 }
 
 function errorResponse(status: number, message: string): Response {
@@ -83,6 +103,10 @@ export async function handleAi(request: Request, env: Env): Promise<Response> {
       case "openrouter": {
         const cfg = OPENAI_COMPAT[req.provider];
         const key = cfg.key(env);
+        const canFallback = req.provider === "gemini" && !!env.AI;
+        if (!key && canFallback) {
+          return streamResponse(await runWorkersAi(env, req, WORKERS_AI_FALLBACK, maxTokens), "workersai", { "x-provider-fallback": "workersai" });
+        }
         if (!key) return errorResponse(400, `Не задан ключ для провайдера ${req.provider}`);
         const res = await fetch(cfg.url, {
           method: "POST",
@@ -98,18 +122,16 @@ export async function handleAi(request: Request, env: Env): Promise<Response> {
             messages: [{ role: "system", content: systemWithSchema(req) }, ...req.messages],
           }),
         });
+        if (!res.ok && canFallback && FALLBACK_STATUSES.has(res.status)) {
+          return streamResponse(await runWorkersAi(env, req, WORKERS_AI_FALLBACK, maxTokens), "workersai", { "x-provider-fallback": "workersai" });
+        }
         if (!res.ok) return errorResponse(res.status, `${req.provider}: ${(await res.text()).slice(0, 600)}`);
         return streamResponse(res.body, "openai");
       }
 
       case "workersai": {
         if (!env.AI) return errorResponse(400, "Workers AI не подключён");
-        const stream = (await env.AI.run(req.model as Parameters<Ai["run"]>[0], {
-          messages: [{ role: "system", content: systemWithSchema(req) }, ...req.messages],
-          max_tokens: maxTokens,
-          stream: true,
-        } as never)) as unknown as ReadableStream;
-        return streamResponse(stream, "workersai");
+        return streamResponse(await runWorkersAi(env, req, req.model, maxTokens), "workersai");
       }
 
       case "mock": {

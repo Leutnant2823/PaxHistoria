@@ -2,7 +2,8 @@ import type { ProviderId, ServerConfig } from "../../shared/api";
 import { MODEL_PRESETS, PROVIDER_LABEL } from "../game/aitasks";
 import type { AiSettings } from "../game/types";
 
-const PROVIDERS: ProviderId[] = ["anthropic", "gemini", "openrouter", "workersai", "mock"];
+// Free providers first: Gemini (free daily quota), then Workers AI (no key needed).
+const PROVIDERS: ProviderId[] = ["gemini", "workersai", "anthropic", "openrouter", "mock"];
 
 export function defaultAi(config: ServerConfig): AiSettings {
   const provider = PROVIDERS.find((p) => config.providers[p]) ?? "anthropic";
@@ -71,7 +72,10 @@ export function AiSettingsFields({
           </select>
         </label>
       )}
-      {!config.providers[value.provider] && (
+      {value.provider === "gemini" && config.providers.workersai && (
+        <div className="muted small">Когда бесплатный лимит Gemini закончится, запросы автоматически уйдут в Cloudflare Workers AI.</div>
+      )}
+      {!config.providers[value.provider] && !(value.provider === "gemini" && config.providers.workersai) && (
         <div className="warn-text">Для этого провайдера на сервере не задан ключ API. См. README, раздел про ключи.</div>
       )}
     </div>

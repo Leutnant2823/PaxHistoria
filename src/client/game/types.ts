@@ -1,6 +1,6 @@
 import type { ProviderId } from "../../shared/api";
 
-export type RelationStatus = "alliance" | "entente" | "war" | "rival" | "truce";
+export type RelationStatus = "alliance" | "entente" | "war" | "rival" | "truce" | "dominion";
 
 export interface Country {
   id: string;

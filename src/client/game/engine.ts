@@ -45,6 +45,7 @@ export const RELATION_LABEL: Record<RelationStatus, string> = {
   war: "война",
   rival: "соперничество",
   truce: "перемирие",
+  dominion: "доминион и метрополия",
 };
 
 // ---------------------------------------------------------------------------
@@ -52,7 +53,7 @@ export const RELATION_LABEL: Record<RelationStatus, string> = {
 
 export function defaultSettings(): Settings {
   return {
-    ai: { provider: "anthropic", model: "claude-opus-5-5", effort: "medium" },
+    ai: { provider: "gemini", model: "gemini-flash-latest", effort: "medium" },
     difficulty: "normal",
     stepEvents: true,
     actionsAlwaysSucceed: false,
@@ -91,6 +92,21 @@ export function newGame(map: MapData, player: string, name: string, settings: Se
     prompts: {},
     nextId: 1000,
   };
+}
+
+/**
+ * Brings a save made by an older version up to date: countries added to the
+ * scenario later (e.g. the British dominions) and their starting relations.
+ */
+export function migrateState(state: GameState): GameState {
+  const missing = Object.keys(COUNTRIES).filter((id) => !state.countries[id]);
+  if (!missing.length) return state;
+  const next = structuredClone(state);
+  for (const id of missing) next.countries[id] = { id, alive: true, ...COUNTRIES[id] };
+  for (const r of RELATIONS) {
+    if ((missing.includes(r.a) || missing.includes(r.b)) && !relationOf(next, r.a, r.b)) next.relations.push({ ...r });
+  }
+  return next;
 }
 
 // ---------------------------------------------------------------------------

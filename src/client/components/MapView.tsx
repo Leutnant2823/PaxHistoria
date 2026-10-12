@@ -29,6 +29,7 @@ const DIPLO_COLORS: Record<RelationStatus | "self" | "none", string> = {
   war: "#c23b2f",
   rival: "#d98c3a",
   truce: "#d8c35a",
+  dominion: "#7fb6a0",
   none: "#b9b2a2",
 };
 

@@ -324,6 +324,13 @@ const RENAME = {
   "Москва": "Москва", "Санкт-Петербург": "Санкт-Петербург", "Стамбул": "Константинополь",
   "Северная Осетия": "Терская область (Владикавказ)", "Чечня": "Терская область (Грозный)",
 };
+// British dominions are separate countries; Papua is administered by Australia (since 1906).
+const DOMINIONS = { CAN: "CAN", AUS: "AUS", NZL: "NZL", ZAF: "SAF" };
+for (const p of pieces) {
+  if (DOMINIONS[p.adm0] && p.owner === "GBR") p.owner = DOMINIONS[p.adm0];
+  if (p.adm0 === "CAN" && p.name === "Ньюфаундленд и Лабрадор") p.owner = "NFL";
+  if (p.adm0 === "PNG" && p.owner === "GBR") p.owner = "AUS";
+}
 for (const p of pieces) {
   if (POST_OWNER[p.name]) p.owner = POST_OWNER[p.name];
   if (RENAME[p.name]) p.name = RENAME[p.name];
