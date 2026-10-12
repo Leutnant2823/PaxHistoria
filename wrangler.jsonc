@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "strategia",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // Custom domain: the bomverao.com zone must be in the same Cloudflare account.
+  "routes": [{ "pattern": "strategia.bomverao.com", "custom_domain": true }],
+  // Runs the Worker close to the AI provider instead of close to the visitor.
+  "placement": { "mode": "smart" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "strategia-db",
+      // Replace with the id printed by `npx wrangler d1 create strategia-db`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ai": { "binding": "AI" },
+  "observability": { "enabled": true }
+}
