@@ -7,16 +7,35 @@ import { mockStream } from "./mock";
 // stream back unchanged; the browser parses it. This keeps Worker CPU time
 // tiny (the free plan allows 10 ms per request).
 
-const OPENAI_COMPAT: Record<"gemini" | "openrouter", { url: string; key: (env: Env) => string | undefined }> = {
-  gemini: {
-    url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    key: (env) => env.GEMINI_API_KEY,
-  },
-  openrouter: {
-    url: "https://openrouter.ai/api/v1/chat/completions",
-    key: (env) => env.OPENROUTER_API_KEY,
-  },
-};
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+// Gemini's native API. New AI Studio keys (prefix "AQ.") only work when sent in
+// the x-goog-api-key header, not as a Bearer token on the OpenAI-compatible route.
+const geminiUrl = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`;
+
+// A war game trips the default safety filters too easily.
+const GEMINI_SAFETY = ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"].map(
+  (category) => ({ category, threshold: "BLOCK_ONLY_HIGH" }),
+);
+
+function geminiRequest(key: string, req: AiRequest, maxTokens: number, limitThinking: boolean): Promise<Response> {
+  return fetch(geminiUrl(req.model), {
+    method: "POST",
+    headers: { "x-goog-api-key": key, "content-type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemWithSchema(req) }] },
+      contents: req.messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+      safetySettings: GEMINI_SAFETY,
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        ...(req.schema ? { responseMimeType: "application/json" } : {}),
+        // Hidden reasoning counts against maxOutputTokens; keep it short so the answer fits.
+        ...(limitThinking ? { thinkingConfig: { thinkingBudget: 1024 } } : {}),
+      },
+    }),
+  });
+}
 
 /** Free fallback when Gemini's free quota runs out or no Gemini key is set. */
 const WORKERS_AI_FALLBACK = "@cf/meta/llama-4-scout-17b-16e-instruct";
@@ -97,48 +116,50 @@ export async function handleAi(request: Request, env: Env): Promise<Response> {
         return streamResponse(res.body, "anthropic");
       }
 
-      case "gemini":
-      case "openrouter": {
-        const cfg = OPENAI_COMPAT[req.provider];
-        const key = cfg.key(env);
-        const canFallback = req.provider === "gemini" && !!env.AI;
-        if (!key && canFallback) {
-          return streamResponse(await runWorkersAi(env, req, WORKERS_AI_FALLBACK, maxTokens), "workersai", { "x-provider-fallback": "workersai" });
+      case "gemini": {
+        const key = env.GEMINI_API_KEY;
+        const fallback = async (reason: string) =>
+          streamResponse(await runWorkersAi(env, req, WORKERS_AI_FALLBACK, maxTokens), "workersai", {
+            "x-provider-fallback": "workersai",
+            "x-fallback-reason": reason.replace(/[^\x20-\x7e]/g, " ").slice(0, 300),
+          });
+        if (!key) {
+          if (env.AI) return fallback("GEMINI_API_KEY not set");
+          return errorResponse(400, "Не задан ключ GEMINI_API_KEY");
         }
-        if (!key) return errorResponse(400, `Не задан ключ для провайдера ${req.provider}`);
-        const res = await fetch(cfg.url, {
+        let res = await geminiRequest(key, req, maxTokens, true);
+        // Some models reject the thinking budget; try once more without it.
+        if (res.status === 400) res = await geminiRequest(key, req, maxTokens, false);
+        // Any Gemini failure (exhausted quota, bad key, unsupported region, overload) falls back
+        // to Workers AI so the game keeps going; the reason travels in a response header.
+        if (!res.ok) {
+          const reason = `gemini ${res.status}: ${(await res.text()).slice(0, 250)}`;
+          if (env.AI) return fallback(reason);
+          return errorResponse(res.status, reason);
+        }
+        return streamResponse(res.body, "gemini", { "x-ai-provider": "gemini" });
+      }
+
+      case "openrouter": {
+        const key = env.OPENROUTER_API_KEY;
+        if (!key) return errorResponse(400, "Не задан ключ OPENROUTER_API_KEY");
+        const res = await fetch(OPENROUTER_URL, {
           method: "POST",
-          headers: {
-            authorization: `Bearer ${key}`,
-            "content-type": "application/json",
-            ...(req.provider === "openrouter" ? { "x-title": "Strategia 1911" } : {}),
-          },
+          headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "x-title": "Strategia" },
           body: JSON.stringify({
             model: req.model,
             max_tokens: maxTokens,
             stream: true,
-            // Gemini counts its hidden reasoning against max_tokens; with the default budget
-            // long reasoning can leave almost nothing for the answer and cut the JSON short.
-            ...(req.provider === "gemini" ? { reasoning_effort: "low" } : {}),
             messages: [{ role: "system", content: systemWithSchema(req) }, ...req.messages],
           }),
         });
-        // Any Gemini failure (exhausted quota, bad key, unsupported region, overload) falls back
-        // to Workers AI so the game keeps going; the reason travels in a response header.
-        if (!res.ok && canFallback) {
-          const reason = `gemini ${res.status}: ${(await res.text()).slice(0, 200).replace(/[^\x20-\x7e]/g, " ")}`;
-          return streamResponse(await runWorkersAi(env, req, WORKERS_AI_FALLBACK, maxTokens), "workersai", {
-            "x-provider-fallback": "workersai",
-            "x-fallback-reason": reason,
-          });
-        }
-        if (!res.ok) return errorResponse(res.status, `${req.provider}: ${(await res.text()).slice(0, 600)}`);
-        return streamResponse(res.body, "openai", { "x-ai-provider": req.provider });
+        if (!res.ok) return errorResponse(res.status, `openrouter: ${(await res.text()).slice(0, 600)}`);
+        return streamResponse(res.body, "openai", { "x-ai-provider": "openrouter" });
       }
 
       case "workersai": {
         if (!env.AI) return errorResponse(400, "Workers AI не подключён");
-        return streamResponse(await runWorkersAi(env, req, req.model, maxTokens), "workersai");
+        return streamResponse(await runWorkersAi(env, req, req.model, maxTokens), "workersai", { "x-ai-provider": "workersai" });
       }
 
       case "mock": {

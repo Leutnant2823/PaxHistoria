@@ -169,7 +169,7 @@ function Advisor({ state, map, update }: Props) {
     try {
       const answer = await advisorReply(state, map, text, (p) => setPending(p.text));
       update((s) => {
-        s.advisor.push({ role: "user", text, date: s.date }, { role: "advisor", text: answer, date: s.date });
+        s.advisor.push({ role: "user", text, date: s.date }, { role: "advisor", text: answer.text, date: s.date, by: answer.by });
       });
     } catch (e) {
       setError((e as Error).message);
@@ -187,6 +187,7 @@ function Advisor({ state, map, update }: Props) {
           <div key={i} className={`msg ${m.role === "user" ? "mine" : "theirs"}`}>
             <div className="msg-head">{m.role === "user" ? "Вы" : "Советник"}, {formatDate(m.date)}</div>
             {m.role === "advisor" ? <Markdown text={m.text} /> : <p>{m.text}</p>}
+            {m.by && <div className="msg-by">ответил: {m.by}</div>}
           </div>
         ))}
         {pending !== null && (

@@ -112,6 +112,8 @@ export interface ChatMessage {
   from: string;
   text: string;
   date: string;
+  /** which AI model wrote the message (shown to the player) */
+  by?: string;
 }
 
 export interface Chat {
@@ -125,6 +127,8 @@ export interface AdvisorMessage {
   role: "user" | "advisor";
   text: string;
   date: string;
+  /** which AI model wrote the answer (shown to the player) */
+  by?: string;
 }
 
 export type Difficulty = "very_easy" | "easy" | "normal" | "hard" | "very_hard" | "impossible";

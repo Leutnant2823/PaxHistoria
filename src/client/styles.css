@@ -772,6 +772,18 @@ label.inline input {
   color: var(--muted);
   margin-bottom: 3px;
 }
+.ai-check {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.msg-by {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-style: italic;
+}
 .msg p:last-child {
   margin-bottom: 0;
 }

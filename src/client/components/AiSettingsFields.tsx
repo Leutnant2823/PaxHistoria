@@ -1,5 +1,7 @@
+import { useState } from "react";
 import type { ProviderId, ServerConfig } from "../../shared/api";
-import { MODEL_PRESETS, PROVIDER_LABEL } from "../game/aitasks";
+import { callAiDetailed } from "../api";
+import { MODEL_PRESETS, PROVIDER_LABEL, answeredBy } from "../game/aitasks";
 import type { AiSettings } from "../game/types";
 
 // Free providers first: Gemini (free daily quota), then Workers AI (no key needed).
@@ -78,6 +80,40 @@ export function AiSettingsFields({
       {!config.providers[value.provider] && !(value.provider === "gemini" && config.providers.workersai) && (
         <div className="warn-text">Для этого провайдера на сервере не задан ключ API. См. README, раздел про ключи.</div>
       )}
+      <AiCheck value={value} />
+    </div>
+  );
+}
+
+/** Sends a tiny request and shows which model actually answered (and why the fallback was used). */
+function AiCheck({ value }: { value: AiSettings }) {
+  const [state, setState] = useState<{ busy: boolean; text?: string; error?: string }>({ busy: false });
+  async function check() {
+    setState({ busy: true });
+    try {
+      const res = await callAiDetailed({
+        provider: value.provider,
+        model: value.model,
+        system: "Ответь одним коротким предложением по-русски.",
+        messages: [{ role: "user", content: "Подтверди, что ты на связи, и назови себя." }],
+        maxTokens: 300,
+        effort: value.provider === "anthropic" ? "low" : undefined,
+        task: "ping",
+      });
+      const lines = [`Ответил: ${answeredBy(res)}.`, `Ответ: ${res.text.trim() || "(пусто)"}`];
+      if (res.fallbackReason) lines.push(`Почему не Gemini: ${res.fallbackReason}`);
+      setState({ busy: false, text: lines.join("\n") });
+    } catch (e) {
+      setState({ busy: false, error: (e as Error).message });
+    }
+  }
+  return (
+    <div className="ai-check">
+      <button type="button" className="btn small" disabled={state.busy || !value.model} onClick={check}>
+        {state.busy ? "Проверяю..." : "Проверить ИИ"}
+      </button>
+      {state.text && <div className="small pre">{state.text}</div>}
+      {state.error && <div className="error-text small">{state.error}</div>}
     </div>
   );
 }

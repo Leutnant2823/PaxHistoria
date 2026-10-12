@@ -3,7 +3,7 @@ import { callAi, callAiDetailed, parseJson, salvageEvents, type AiProgress, type
 import type { MapData } from "./mapdata";
 import type { Chat, Change, EventKind, GameEvent, GameState, PromptKey } from "./types";
 import { addDays, addMonths, countryName, formatDate, isValidDate, relationOf, RELATION_LABEL } from "./engine";
-import { chatTranscript, countryLine, fullContext, relationsText, worldOverview } from "./context";
+import { briefContext, chatTranscript, countryLine, fullContext, relationsText, worldOverview } from "./context";
 import { DIFFICULTY_TEXT, fill, promptFor } from "./prompts";
 import { getScenario } from "./scenarios";
 
@@ -73,6 +73,12 @@ function ai(
     schema: opts.schema,
     task,
   };
+}
+
+/** Short label of the model that answered, e.g. "Google Gemini" or "Cloudflare Workers AI (резерв)". */
+export function answeredBy(result: AiResult): string {
+  const label = PROVIDER_LABEL[result.provider as ProviderId] ?? result.provider;
+  return result.fallbackReason ? `${label} (резерв: Gemini недоступен)` : label;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +261,13 @@ ${relationsText(state)}
 ${recent}`;
 }
 
-export async function chatReply(state: GameState, map: MapData, chat: Chat, speaker: string, onProgress?: Progress): Promise<string> {
+export async function chatReply(
+  state: GameState,
+  map: MapData,
+  chat: Chat,
+  speaker: string,
+  onProgress?: Progress,
+): Promise<{ text: string; by: string }> {
   const name = countryName(state, speaker);
   const sys = `${system(state, "chat", { SPEAKER: `${name} (${speaker})` })}\n\n${speakerContext(state, map, speaker)}`;
   const others = chat.participants.filter((p) => p !== speaker).map((p) => countryName(state, p));
@@ -264,9 +276,9 @@ export async function chatReply(state: GameState, map: MapData, chat: Chat, spea
 Переписка:
 ${chatTranscript(state, chat)}
 
-Напиши следующую реплику от лица страны ${name}.`;
-  const text = await callAi(ai(state, "chat", sys, [{ role: "user", content: user }], { maxTokens: 3000, effort: "low" }), onProgress);
-  return text.trim();
+Напиши следующее послание от лица страны ${name} в ответ на последнее сообщение. Ты представляешь ${name}, а не ${countryName(state, state.player)}. Без пересказа обстановки.`;
+  const res = await callAiDetailed(ai(state, "chat", sys, [{ role: "user", content: user }], { maxTokens: 3000, effort: "low" }), onProgress);
+  return { text: res.text.trim(), by: answeredBy(res) };
 }
 
 export async function nextSpeaker(state: GameState, chat: Chat): Promise<string | null> {
@@ -295,18 +307,27 @@ export async function describeAction(state: GameState, chat: Chat): Promise<stri
 // ---------------------------------------------------------------------------
 // Advisor and actions
 
-export async function advisorReply(state: GameState, map: MapData, question: string, onProgress?: Progress): Promise<string> {
+export async function advisorReply(
+  state: GameState,
+  map: MapData,
+  question: string,
+  onProgress?: Progress,
+): Promise<{ text: string; by: string }> {
   const pending = state.pending.map((a, i) => `${i + 1}. ${a.text}`).join("\n") || "нет";
-  const sys = `${system(state, "advisor")}\n\nОБСТАНОВКА:\n${fullContext(state, map)}\n\nПРИКАЗЫ, ПОДГОТОВЛЕННЫЕ НА ЭТОТ ХОД:\n${pending}`;
-  const history: AiMessage[] = state.advisor.slice(-12).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
-  const messages: AiMessage[] = [...history, { role: "user", content: question }];
+  const sys = `${system(state, "advisor")}\n\nОБСТАНОВКА:\n${briefContext(state, map)}\n\nПРИКАЗЫ, ПОДГОТОВЛЕННЫЕ НА ЭТОТ ХОД:\n${pending}`;
+  const history: AiMessage[] = state.advisor.slice(-8).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
+  // A reminder right next to the question keeps smaller models on track.
+  const player = countryName(state, state.player);
+  const reminder = `\n\n(Ты советник страны ${player}, сейчас ${formatDate(state.date)}. Ответь на этот вопрос в интересах страны ${player}, сразу по существу, без вступления о раскладе сил.)`;
+  const messages: AiMessage[] = [...history, { role: "user", content: question + reminder }];
   while (messages.length && messages[0].role !== "user") messages.shift();
-  return (await callAi(ai(state, "advisor", sys, messages, { maxTokens: 6000 }), onProgress)).trim();
+  const res = await callAiDetailed(ai(state, "advisor", sys, messages, { maxTokens: 6000 }), onProgress);
+  return { text: res.text.trim(), by: answeredBy(res) };
 }
 
 export async function brainstorm(state: GameState, map: MapData): Promise<string[]> {
   const pending = state.pending.map((a) => `- ${a.text}`).join("\n") || "нет";
-  const user = `${fullContext(state, map)}\n\nУЖЕ ЗАПЛАНИРОВАНО:\n${pending}`;
+  const user = `${briefContext(state, map)}\n\nУЖЕ ЗАПЛАНИРОВАНО:\n${pending}\n\nПредложи действия именно для страны ${countryName(state, state.player)}.`;
   const schema = {
     type: "object",
     additionalProperties: false,

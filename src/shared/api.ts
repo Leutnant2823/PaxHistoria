@@ -22,7 +22,7 @@ export interface AiRequest {
 }
 
 /** Format of the event stream the Worker passes through unchanged. */
-export type StreamFormat = "anthropic" | "openai" | "workersai";
+export type StreamFormat = "anthropic" | "openai" | "workersai" | "gemini";
 
 export interface ServerConfig {
   providers: Record<ProviderId, boolean>;

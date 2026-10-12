@@ -102,6 +102,19 @@ function deltaOf(format: StreamFormat, data: unknown): Delta {
     if (d.type === "message_delta" && d.delta?.stop_reason === "max_tokens") return { truncated: true };
     return {};
   }
+  if (format === "gemini") {
+    if (d.error) return { error: d.error.message ?? String(d.error) };
+    const cand = d.candidates?.[0];
+    if (!cand) return d.promptFeedback?.blockReason ? { error: `Gemini заблокировал запрос (${d.promptFeedback.blockReason})` } : {};
+    const parts: { text?: string; thought?: boolean }[] = cand.content?.parts ?? [];
+    const text = parts.filter((p) => !p.thought && p.text).map((p) => p.text).join("");
+    return {
+      text,
+      thinking: parts.some((p) => p.thought),
+      truncated: cand.finishReason === "MAX_TOKENS",
+      refusal: cand.finishReason === "SAFETY" || cand.finishReason === "PROHIBITED_CONTENT",
+    };
+  }
   if (format === "openai") {
     if (d.error) return { error: d.error.message ?? String(d.error) };
     const choice = d.choices?.[0];

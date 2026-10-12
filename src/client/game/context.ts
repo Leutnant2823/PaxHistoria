@@ -149,7 +149,36 @@ export function warsText(state: GameState): string {
   return wars.length ? `Игрок воюет с: ${wars.map((w) => countryName(state, w)).join(", ")}.` : "Игрок ни с кем не воюет.";
 }
 
-/** Full context block used by jumps and the advisor. */
+/**
+ * Shorter context for the advisor and idea generation: no province lists and
+ * no minor countries, so smaller models keep track of who is who.
+ */
+export function briefContext(state: GameState, map: MapData): string {
+  const player = state.countries[state.player];
+  const majors = Object.values(state.countries).filter((c) => c.alive && c.major && c.id !== state.player);
+  const ownArmies = state.armies.filter((a) => a.owner === state.player);
+  return [
+    `ТЕКУЩАЯ ДАТА: ${state.date}`,
+    `СТРАНА ИГРОКА: ${countryLine(state, map, state.player)}`,
+    player.description,
+    warsText(state),
+    "",
+    "ДРУГИЕ ВЕЛИКИЕ ДЕРЖАВЫ:",
+    ...majors.map((c) => `- ${countryLine(state, map, c.id)}`),
+    "",
+    "ОТНОШЕНИЯ:",
+    relationsText(state),
+    "",
+    "АРМИИ И ФЛОТЫ ИГРОКА:",
+    ownArmies.length
+      ? ownArmies.map((a) => `- ${a.name}: ${a.kind === "fleet" ? `${a.size} линкоров` : `${a.size} тыс. чел.`}, ${map.regions[a.region]?.n ?? "?"}`).join("\n")
+      : "нет",
+    "",
+    historyText(state),
+  ].join("\n");
+}
+
+/** Full context block used by jumps. */
 export function fullContext(state: GameState, map: MapData, extraFocus: string[] = []): string {
   const focus = focusCountries(state, extraFocus);
   return [

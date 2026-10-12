@@ -145,8 +145,8 @@ function ChatWindow({ state, map, update, stateRef, chat, onClose, locked }: Pro
     // Work on a local copy for AI context; push results into the real state as they arrive.
     const local: GameState = structuredClone(stateRef.current);
     const localChat = local.chats.find((c) => c.id === chat.id)!;
-    const push = (from: string, body: string) => {
-      const msg = { id: newId(local, "m"), from, text: body, date: local.date };
+    const push = (from: string, body: string, by?: string) => {
+      const msg = { id: newId(local, "m"), from, text: body, date: local.date, ...(by ? { by } : {}) };
       localChat.messages.push(msg);
       update((s) => {
         s.nextId = Math.max(s.nextId, local.nextId);
@@ -159,7 +159,10 @@ function ChatWindow({ state, map, update, stateRef, chat, onClose, locked }: Pro
       if (chat.participants.length === 1) {
         const speaker = chat.participants[0];
         setTyping({ who: speaker, text: "" });
-        push(speaker, await chatReply(local, map, localChat, speaker, (p) => setTyping({ who: speaker, text: p.text })));
+        {
+          const reply = await chatReply(local, map, localChat, speaker, (p) => setTyping({ who: speaker, text: p.text }));
+          push(speaker, reply.text, reply.by);
+        }
       } else {
         for (let i = 0; i < MAX_GROUP_REPLIES; i++) {
           setTyping({ who: "", text: "" });
@@ -167,7 +170,10 @@ function ChatWindow({ state, map, update, stateRef, chat, onClose, locked }: Pro
           const speaker = (await nextSpeaker(local, localChat)) ?? (i === 0 ? localChat.participants[0] : null);
           if (!speaker) break;
           setTyping({ who: speaker, text: "" });
-          push(speaker, await chatReply(local, map, localChat, speaker, (p) => setTyping({ who: speaker, text: p.text })));
+          {
+          const reply = await chatReply(local, map, localChat, speaker, (p) => setTyping({ who: speaker, text: p.text }));
+          push(speaker, reply.text, reply.by);
+        }
         }
       }
     } catch (e) {
@@ -209,6 +215,7 @@ function ChatWindow({ state, map, update, stateRef, chat, onClose, locked }: Pro
               {m.from === "player" ? countryName(state, state.player) : countryName(state, m.from)}, {formatDate(m.date)}
             </div>
             <p className="pre">{m.text}</p>
+            {m.by && <div className="msg-by">ответил: {m.by}</div>}
           </div>
         ))}
         {typing && (
