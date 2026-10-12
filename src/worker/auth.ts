@@ -42,7 +42,10 @@ export async function isAuthenticated(req: Request, env: Env): Promise<boolean> 
 export async function login(req: Request, env: Env): Promise<Response> {
   if (!env.AUTH_USER || !env.AUTH_PASSWORD) {
     return Response.json(
-      { error: "На сервере не заданы секреты AUTH_USER и AUTH_PASSWORD. См. README." },
+      {
+        error:
+          "Сервер не видит AUTH_USER и AUTH_PASSWORD. Добавьте их в Cloudflare: Workers & Pages, strategia, Settings, раздел Variables and Secrets (не Build). После сохранения подождите минуту и обновите страницу.",
+      },
       { status: 500 },
     );
   }

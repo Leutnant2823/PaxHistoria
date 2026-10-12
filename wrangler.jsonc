@@ -22,5 +22,7 @@
     }
   ],
   "ai": { "binding": "AI" },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Keep variables added in the dashboard (AUTH_USER etc.) when a new build deploys.
+  "keep_vars": true
 }
