@@ -8,7 +8,7 @@ export interface RegionMeta {
   n: string;
   /** modern country code the province belongs to (Natural Earth adm0) */
   a: string;
-  /** owner on 1 January 1911 */
+  /** owner at the scenario start */
   o: string;
   /** area, km² */
   k: number;
@@ -49,7 +49,7 @@ export interface MapData {
   source: string;
 }
 
-export async function loadMap(url = "/data/map1911.json"): Promise<MapData> {
+export async function loadMap(url: string): Promise<MapData> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Не удалось загрузить карту (${res.status})`);
   const raw = (await res.json()) as RawMap;

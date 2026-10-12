@@ -1,6 +1,6 @@
 import type { ProviderId } from "../../shared/api";
 
-export type RelationStatus = "alliance" | "entente" | "war" | "rival" | "truce" | "dominion";
+export type RelationStatus = "alliance" | "entente" | "war" | "rival" | "truce" | "dominion" | "puppet";
 
 export interface Country {
   id: string;
@@ -188,4 +188,35 @@ export interface GameState {
   summaries: Summary[];
   prompts: Partial<Record<PromptKey, string>>;
   nextId: number;
+}
+
+// ---------------------------------------------------------------------------
+// Scenarios
+
+export type CountrySeed = Omit<Country, "id" | "alive">;
+
+export interface ArmySeed {
+  owner: string;
+  name: string;
+  city: string;
+  /** thousands of men for armies, capital ships for fleets */
+  size: number;
+  kind: "army" | "fleet";
+}
+
+export interface Scenario {
+  id: string;
+  /** short headline shown on the scenario card */
+  title: string;
+  year: string;
+  startDate: string;
+  defaultPlayer: string;
+  intro: string;
+  /** URL of the province map built by scripts/build-map.mjs */
+  map: string;
+  countries: Record<string, CountrySeed>;
+  relations: Relation[];
+  armies: ArmySeed[];
+  /** short names for map labels (used while a country keeps its original name) */
+  shortNames: Record<string, string>;
 }

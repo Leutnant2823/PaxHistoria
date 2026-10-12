@@ -2,24 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import type { GameMeta, ServerConfig } from "../../shared/api";
 import { api } from "../api";
 import type { MapData } from "../game/mapdata";
-import type { Difficulty, GameState } from "../game/types";
+import type { Difficulty, GameState, Scenario } from "../game/types";
 import { defaultSettings, formatDate, newGame } from "../game/engine";
-import { COUNTRIES, DEFAULT_PLAYER, INTRO } from "../game/scenario1911";
+import { SCENARIOS } from "../game/scenarios";
 import { DIFFICULTY_LABEL } from "../game/prompts";
 import { AiSettingsFields, defaultAi } from "../components/AiSettingsFields";
 import { persistGame, persistSnapshot } from "../game/persist";
 
 interface Props {
-  map: MapData | null;
   config: ServerConfig | null;
-  onOpen: (game: GameState) => void;
+  getMap: (scenarioId: string) => Promise<MapData>;
+  onOpen: (game: GameState, map: MapData) => void;
   onLogout: () => void;
 }
 
-export function Menu({ map, config, onOpen, onLogout }: Props) {
+export function Menu({ config, getMap, onOpen, onLogout }: Props) {
   const [games, setGames] = useState<GameMeta[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<Scenario | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,7 +29,8 @@ export function Menu({ map, config, onOpen, onLogout }: Props) {
   async function open(id: string) {
     setBusy(id);
     try {
-      onOpen(await api.loadGame<GameState>(id));
+      const game = await api.loadGame<GameState>(id);
+      onOpen(game, await getMap(game.scenario));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -42,7 +43,7 @@ export function Menu({ map, config, onOpen, onLogout }: Props) {
     setGames((list) => list?.filter((x) => x.id !== g.id) ?? null);
   }
 
-  const ready = !!map && !!config;
+  const ready = !!config;
 
   return (
     <div className="menu-screen title-bg">
@@ -54,14 +55,18 @@ export function Menu({ map, config, onOpen, onLogout }: Props) {
       </header>
 
       <div className="menu-body">
-        <section className="menu-card scenario-card">
-          <div className="scenario-year">1911</div>
-          <h2>Мир накануне бури</h2>
-          <p>{INTRO}</p>
-          <button className="btn primary big" disabled={!ready} onClick={() => setCreating(true)}>
-            {ready ? "Новая партия" : "Загрузка карты..."}
-          </button>
-        </section>
+        <div className="scenario-column">
+          {SCENARIOS.map((sc) => (
+            <section key={sc.id} className="menu-card scenario-card">
+              <div className="scenario-year">{sc.year}</div>
+              <h2>{sc.title}</h2>
+              <p>{sc.intro}</p>
+              <button className="btn primary big" disabled={!ready} onClick={() => setCreating(sc)}>
+                Новая партия
+              </button>
+            </section>
+          ))}
+        </div>
 
         <section className="menu-card">
           <h2>Сохранённые партии</h2>
@@ -91,15 +96,16 @@ export function Menu({ map, config, onOpen, onLogout }: Props) {
         </section>
       </div>
 
-      {creating && map && config && (
+      {creating && config && (
         <NewGameDialog
-          map={map}
+          scenario={creating}
+          getMap={getMap}
           config={config}
-          onCancel={() => setCreating(false)}
-          onCreate={async (game) => {
+          onCancel={() => setCreating(null)}
+          onCreate={async (game, map) => {
             await persistGame(game);
             await persistSnapshot(game);
-            onOpen(game);
+            onOpen(game, map);
           }}
         />
       )}
@@ -108,18 +114,21 @@ export function Menu({ map, config, onOpen, onLogout }: Props) {
 }
 
 function NewGameDialog({
-  map,
+  scenario,
+  getMap,
   config,
   onCancel,
   onCreate,
 }: {
-  map: MapData;
+  scenario: Scenario;
+  getMap: (scenarioId: string) => Promise<MapData>;
   config: ServerConfig;
   onCancel: () => void;
-  onCreate: (g: GameState) => Promise<void>;
+  onCreate: (g: GameState, map: MapData) => Promise<void>;
 }) {
-  const [player, setPlayer] = useState(DEFAULT_PLAYER);
-  const [name, setName] = useState("Германия, 1911");
+  const COUNTRIES = scenario.countries;
+  const [player, setPlayer] = useState(scenario.defaultPlayer);
+  const [name, setName] = useState(`${COUNTRIES[scenario.defaultPlayer].name}, ${scenario.year}`);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
   const [ai, setAi] = useState(() => defaultAi(config));
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +137,7 @@ function NewGameDialog({
   const countries = useMemo(
     () =>
       Object.entries(COUNTRIES).sort(([, a], [, b]) => Number(b.major) - Number(a.major) || a.name.localeCompare(b.name, "ru")),
-    [],
+    [COUNTRIES],
   );
 
   async function create() {
@@ -136,7 +145,8 @@ function NewGameDialog({
     setError(null);
     try {
       const settings = { ...defaultSettings(), difficulty, ai };
-      await onCreate(newGame(map, player, name.trim() || "Партия", settings));
+      const map = await getMap(scenario.id);
+      await onCreate(newGame(map, scenario, player, name.trim() || "Партия", settings), map);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -146,7 +156,7 @@ function NewGameDialog({
   return (
     <div className="modal-backdrop">
       <div className="modal">
-        <h2>Новая партия: 1 января 1911 года</h2>
+        <h2>Новая партия: {formatDate(scenario.startDate)}</h2>
         <div className="form-grid">
           <label>
             Страна
@@ -154,7 +164,7 @@ function NewGameDialog({
               value={player}
               onChange={(e) => {
                 setPlayer(e.target.value);
-                setName(`${COUNTRIES[e.target.value].name}, 1911`);
+                setName(`${COUNTRIES[e.target.value].name}, ${scenario.year}`);
               }}
             >
               <optgroup label="Великие державы">
@@ -197,7 +207,7 @@ function NewGameDialog({
             Отмена
           </button>
           <button className="btn primary" onClick={create} disabled={busy || !ai.model}>
-            {busy ? "Создание..." : "Начать"}
+            {busy ? "Загрузка карты..." : "Начать"}
           </button>
         </div>
       </div>

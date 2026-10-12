@@ -1,6 +1,7 @@
-// Builds the 1911 world map: Natural Earth admin-1 provinces are overlaid with
-// the 1914 borders from aourednik/historical-basemaps, then corrected to the
-// state of 1 January 1911. Output: public/data/map1911.json (projected TopoJSON).
+// Builds a scenario map: Natural Earth admin-1 provinces are overlaid with a
+// historical basemap from aourednik/historical-basemaps, then corrected by the
+// scenario's tables (scripts/scenarios/<id>.mjs).
+// Usage: node scripts/build-map.mjs 1911   ->  public/data/map1911.json
 //
 // Raw inputs (not committed, ~45 MB) are downloaded into data/raw on first run.
 import fs from "node:fs";
@@ -11,16 +12,18 @@ import { topology } from "topojson-server";
 import { presimplify, simplify } from "topojson-simplify";
 import { quantize } from "topojson-client";
 import { geoMiller } from "d3-geo-projection";
-import { geoPath } from "d3-geo";
-import { CITIES } from "./cities1911.mjs";
+import { geoArea, geoPath } from "d3-geo";
+import { GROUP_BY_REGION, SMALL_COUNTRY_KM2, REGION_RU, COUNTRY_RU } from "./map-common.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const RAW = path.join(ROOT, "data/raw");
-const OUT = path.join(ROOT, "public/data/map1911.json");
+const SCENARIO_ID = process.argv[2] || "1911";
+const scenario = (await import(`./scenarios/${SCENARIO_ID}.mjs`)).default;
+const { OWNER_BY_NAME, ADM0_OWNER, ADM1_OWNER, CUSTOM_GROUPS, CITIES } = scenario;
+const OUT = path.join(ROOT, `public/data/map${SCENARIO_ID}.json`);
 
 const SOURCES = {
-  "world_1914.geojson":
-    "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_1914.geojson",
+  [`${scenario.basemap}.geojson`]: `https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/${scenario.basemap}.geojson`,
   "ne_admin1.geojson":
     "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces.geojson",
   "ne_lakes.geojson":
@@ -38,131 +41,8 @@ function load(name) {
 }
 
 // ---------------------------------------------------------------------------
-// Owners of the 1914 polygons (by NAME), already adjusted to 1911.
-const OWNER_1914 = {
-  Abyssinia: "ETH", Afghanistan: "AFG", Albania: "OTT", "American Samoa": "USA",
-  Anguilla: "GBR", "Antigua and Barbuda": "GBR", "Arabia (Nejd)": "NEJ", Argentina: "ARG",
-  Armenia: "RUS", Australia: "GBR", "Austro-Hungarian Empire": "AUH", Azerbaijan: "RUS",
-  Barbados: "GBR", "Belgian Congo": "BEL", Belgium: "BEL", Belize: "GBR", Bhutan: "BHU",
-  Bolivia: "BOL", Brazil: "BRA", Brunei: "GBR", Bulgaria: "BUL", Canada: "GBR", Ceylon: "GBR",
-  Chile: "CHL", "Rapa Nui": "CHL", Colombia: "COL", "Costa Rica": "CRI", Cuba: "CUB",
-  Denmark: "DEN", Dominica: "GBR", "Dominican Republic": "DOM", Ecuador: "ECU",
-  "El Salvador": "ESA", "Empire of Japan": "JAP", "Equatorial Guinea": "ESP", Fiji: "GBR",
-  Finland: "RUS", "Madagascar (France)": "FRA", Djibouti: "FRA", "French Indochina": "FRA",
-  Algeria: "FRA", "French Equatorial Africa": "FRA", "French West Africa": "FRA", France: "FRA",
-  "French Guiana": "FRA", "Gambia, The": "GBR", Georgia: "RUS",
-  "German E. Africa (Tanganyika)": "GER", "German Empire": "GER",
-  "German South-West Africa": "GER", Greece: "GRE", Grenada: "GBR", Guadeloupe: "FRA",
-  Guatemala: "GUA", Guyana: "GBR", Haiti: "HAI", Honduras: "HON", Iceland: "DEN",
-  Eritrea: "ITA", "Kingdom of Italy": "ITA", Libya: "OTT", "Italian Somaliland": "ITA",
-  Kamerun: "GER", Kuwait: "KUW", Lesotho: "GBR", Liberia: "LBR", Luxembourg: "LUX",
-  Malaya: "GBR", Malta: "GBR", "Manchu Empire": "QNG", Martinique: "FRA", Mexico: "MEX",
-  Mongolia: "QNG", Montenegro: "MNT", Montserrat: "GBR", Morocco: "MOR", Nepal: "NEP",
-  Netherlands: "NED", "Netherlands Antilles": "NED", "Netherlands Indies": "NED",
-  "New Zealand": "GBR", Nicaragua: "NIC", Niue: "GBR", Norway: "NOR",
-  "Ottoman Empire": "OTT", Panama: "PAN", "Papua New Guinea": "GBR", Paraguay: "PAR",
-  Persia: "PER", Peru: "PRU", Philippines: "USA", Angola: "POR", Mozambique: "POR",
-  Portugal: "POR", "Portuguese Guinea": "POR", "Puerto Rico": "USA", Qatar: "OTT",
-  "Rattanakosin Kingdom": "SIA", "Rio De Oro": "ESP", Romania: "ROM", "Sakhalin (RU)": "RUS",
-  "Russian Empire": "RUS", "Saint Barthelemy": "FRA", "Saint Kitts and Nevis": "GBR",
-  "Saint Lucia": "GBR", "Saint Martin": "FRA", "Saint Vincent and the Grenadines": "GBR",
-  Samoa: "GER", Serbia: "SER", "Sierra Leone": "GBR", Spain: "ESP", "Spanish Sahara": "ESP",
-  "Spanish Morocco": "MOR", Suriname: "NED", Swaziland: "GBR", Sweden: "SWE",
-  Switzerland: "SUI", Tibet: "QNG", Togoland: "GER", Tonga: "GBR", Tunisia: "FRA",
-  Uganda: "GBR", "British Raj": "GBR", "Hong Kong": "GBR",
-  "United Kingdom of Great Britain and Ireland": "GBR", Malawi: "GBR", Botswana: "GBR",
-  "South Africa": "GBR", "Anglo-Egyptian Sudan": "GBR", Egypt: "GBR", "Gold Coast": "GBR",
-  Nigeria: "GBR", "British East Africa": "GBR", "British Somaliland": "GBR", Rhodesia: "GBR",
-  "British Protectorate": "GBR", "United States": "USA", "United States Virgin Islands": "DEN",
-  Uruguay: "URU", Venezuela: "VEN", "Wallis and Futuna Islands": "FRA", Xinjiang: "QNG",
-};
-
-// Whole modern countries whose 1911 owner is fixed regardless of the overlay.
-const ADM0_OWNER = {
-  ALB: "OTT", KOS: "OTT", MKD: "OTT", LBY: "OTT", QAT: "OTT", PSX: "OTT", ISR: "OTT",
-  LBN: "OTT", SYR: "OTT", IRQ: "OTT", JOR: "OTT",
-  MAR: "MOR", MNG: "QNG", CHN: "QNG", TWN: "JAP", KOR: "JAP", PRK: "JAP",
-  FIN: "RUS", ARM: "RUS", GEO: "RUS", AZE: "RUS", KAB: "RUS",
-  ISL: "DEN", FRO: "DEN", GRL: "DEN", VIR: "DEN",
-  IRL: "GBR", CAN: "GBR", AUS: "GBR", NZL: "GBR", ZAF: "GBR", CYP: "GBR", CYN: "GBR",
-  ESB: "GBR", WSB: "GBR", SOL: "GBR", IND: "GBR", PAK: "GBR", BGD: "GBR", MMR: "GBR",
-  LKA: "GBR", KAS: "GBR", MYS: "GBR", SGP: "GBR", EGY: "GBR", SDN: "GBR", SDS: "GBR",
-  BHR: "GBR", ARE: "GBR", HKG: "GBR", MAC: "POR", SAH: "ESP", USG: "USA", PHL: "USA",
-  CLP: "FRA", TUR: "OTT", SJM: "NOR",
-  GIB: "GBR", PCN: "GBR", SYC: "GBR", KIR: "GBR", VGB: "GBR", CYM: "GBR", BMU: "GBR",
-  SHN: "GBR", MUS: "GBR", JEY: "GBR", GGY: "GBR", IMN: "GBR", IOT: "GBR", NFK: "GBR",
-  COK: "GBR", SLB: "GBR", TUV: "GBR", MDV: "GBR", FLK: "GBR", VUT: "GBR",
-  NCL: "FRA", SPM: "FRA", PYF: "FRA", COM: "FRA", ABW: "NED", STP: "POR", CPV: "POR",
-  ALD: "RUS", MHL: "GER", NRU: "GER", FSM: "GER", PLW: "GER", MNP: "GER", GUM: "USA",
-};
-
-// Province-level corrections from 1914 back to 1911.
-const ADM1_OWNER = {
-  GRC: {
-    "Dytiki Makedonia": "OTT", Ipeiros: "OTT", "Kentriki Makedonia": "OTT",
-    "Anatoliki Makedonia kai Thraki": "OTT", "Ayion Oros": "OTT", "Voreio Aigaio": "OTT",
-    Kriti: "CRT",
-  },
-  BGR: { Blagoevgrad: "OTT", Kardzhali: "OTT", Smolyan: "OTT", Dobrich: "BUL", Silistra: "BUL" },
-  RUS: { Tuva: "QNG", Tyva: "QNG" },
-  PNG: {
-    "East Sepik": "GER", Sandaun: "GER", Madang: "GER", Morobe: "GER", Manus: "GER",
-    "New Ireland": "GER", "East New Britain": "GER", "West New Britain": "GER",
-    Bougainville: "GER", "North Solomons": "GER",
-  },
-};
-
-// Custom province groups (merged before the overlay).
-const CUSTOM_GROUPS = {
-  MNE: [
-    { name: "Новопазарский санджак (север)", members: ["Pljevlja", "Bijelo Polje", "Berane", "Rožaje", "Plav"] },
-    { name: "Черногория", members: "*" },
-  ],
-};
-const GROUP_BY_REGION = new Set(["GBR", "LVA", "PHL", "UGA", "AZE"]);
-const SMALL_COUNTRY_KM2 = 25000;
-
-const REGION_RU = {
-  "Northern Ireland": "Ольстер", "West Wales and the Valleys": "Западный Уэльс",
-  "North West": "Северо-Западная Англия", "West Midlands": "Уэст-Мидлендс",
-  "South West": "Юго-Западная Англия", Eastern: "Восточная Шотландия", "North East": "Северо-Восточная Англия",
-  "South Western": "Юго-Западная Шотландия", "Yorkshire and the Humber": "Йоркшир",
-  "East Midlands": "Ист-Мидлендс", East: "Восточная Англия", "South East": "Юго-Восточная Англия",
-  "East Wales": "Восточный Уэльс", "Highlands and Islands": "Хайленд и острова",
-  "North Eastern": "Абердиншир", "Greater London": "Лондон",
-  Vidzeme: "Лифляндия (Видземе)", Riga: "Рига", Latgale: "Латгалия", Zemgale: "Курляндия (Земгале)",
-  Kurzeme: "Курляндия (Курземе)",
-  Western: "Западная Уганда", Central: "Буганда", Northern: "Северная Уганда",
-};
-
-const COUNTRY_RU = {
-  SVN: "Крайна", KOS: "Косово", MKD: "Македония", MLT: "Мальта", LUX: "Люксембург",
-  BHS: "Багамские острова", SYC: "Сейшельские острова", CPV: "Острова Зелёного Мыса",
-  MDV: "Мальдивы", PLW: "Палау", KNA: "Сент-Китс и Невис", NRU: "Науру", TTO: "Тринидад и Тобаго",
-  MUS: "Маврикий", AIA: "Ангилья", BRB: "Барбадос", LCA: "Сент-Люсия", BMU: "Бермуды",
-  ALD: "Аландские острова", COK: "Острова Кука", WSM: "Самоа", DMA: "Доминика",
-  LIE: "Лихтенштейн", SMR: "Сан-Марино", AND: "Андорра", GRD: "Гренада", VCT: "Сент-Винсент",
-  ATG: "Антигуа", TCA: "Теркс и Кайкос", BRN: "Бруней", SWZ: "Свазиленд", GMB: "Гамбия",
-  CYP: "Кипр", LBN: "Ливан", QAT: "Катар", KWT: "Кувейт", BHR: "Бахрейн", PSX: "Палестина",
-  ISR: "Палестина", JAM: "Ямайка", TLS: "Тимор", COM: "Коморские острова", MCO: "Монако",
-  VAT: "Ватикан", GIB: "Гибралтар", HKG: "Гонконг", MAC: "Макао", SGP: "Сингапур",
-  FJI: "Фиджи", TON: "Тонга", VUT: "Новые Гебриды", SLB: "Соломоновы острова",
-  NCL: "Новая Каледония", PYF: "Французская Полинезия", PRI: "Пуэрто-Рико", GUM: "Гуам",
-  MNP: "Марианские острова", FSM: "Каролинские острова", MHL: "Маршалловы острова",
-  KIR: "Острова Гилберта", TUV: "Острова Эллис", NIU: "Ниуэ", ASM: "Восточное Самоа",
-  WLF: "Уоллис и Футуна", GNQ: "Испанская Гвинея", STP: "Сан-Томе", DJI: "Джибути",
-  RWA: "Руанда", BDI: "Урунди", GNB: "Португальская Гвинея", LSO: "Басутоленд",
-  CUW: "Кюрасао", ABW: "Аруба", SXM: "Синт-Мартен", MAF: "Сен-Мартен", BLM: "Сен-Бартелеми",
-  VGB: "Виргинские острова", CYM: "Каймановы острова", MSR: "Монтсеррат", JEY: "Джерси",
-  GGY: "Гернси", IMN: "Остров Мэн", FRO: "Фарерские острова", BLZ: "Британский Гондурас",
-  SLV: "Сальвадор", HTI: "Гаити", ESB: "Кипр", WSB: "Кипр", CYN: "Кипр",
-  SHN: "Остров Святой Елены", FLK: "Фолклендские острова", SPM: "Сен-Пьер и Микелон",
-  NFK: "Остров Норфолк", PCN: "Острова Питкэрн", IOT: "Чагос", MDA: "Бессарабия",
-};
-
-// ---------------------------------------------------------------------------
 const admin1 = load("ne_admin1.geojson");
-const world = load("world_1914.geojson");
+const world = load(`${scenario.basemap}.geojson`);
 const lakesRaw = load("ne_lakes.geojson");
 
 const area = (f) => turf.area(f) / 1e6;
@@ -228,17 +108,19 @@ for (const [adm0, list] of byAdm0) {
 }
 console.log("province groups:", groups.length);
 
-// 3. Overlay with 1914 polygons.
+// 3. Overlay with the historical polygons.
 const histo = world.features
   .filter((f) => f.geometry)
-  .map((f) => ({ f, owner: OWNER_1914[f.properties.NAME] || null, bbox: turf.bbox(f) }));
-const unknown = new Set(world.features.map((f) => f.properties.NAME).filter((n) => n && !OWNER_1914[n]));
-if (unknown.size) console.warn("unmapped 1914 names:", [...unknown]);
+  .map((f) => ({ f, owner: OWNER_BY_NAME[f.properties.NAME] || null, bbox: turf.bbox(f) }));
+const unknown = new Set(world.features.map((f) => f.properties.NAME).filter((n) => n && !OWNER_BY_NAME[n]));
+if (unknown.size) console.warn("unmapped basemap names:", [...unknown]);
 
+const UNKNOWN = "__unknown";
+const ownerOrNull = (o) => (!o || o === UNKNOWN ? null : o);
 const bboxHit = (a, b) => a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
 
 // The overlay takes a few minutes; its result is cached in data/raw (delete to rebuild).
-const CACHE = path.join(RAW, "pieces-cache.json");
+const CACHE = path.join(RAW, `pieces-cache-${SCENARIO_ID}.json`);
 let pieces = []; // { adm0, name, owner, feature, area }
 if (fs.existsSync(CACHE)) pieces = JSON.parse(fs.readFileSync(CACHE, "utf8"));
 let n = 0;
@@ -265,27 +147,36 @@ for (const g of pieces.length ? [] : groups) {
     if (!parts.has(h.owner)) parts.set(h.owner, []);
     parts.get(h.owner).push(inter);
   }
+  // Optionally treat land the basemap does not cover as an "unknown" owner (filled from
+  // ADM0_FALLBACK later), so a province is not handed to a neighbour that touches its edge.
+  if (scenario.uncoveredAsUnknown) {
+    const covered = [...shares.values()].reduce((s, a) => s + a, 0);
+    if (total - covered > 0) shares.set(UNKNOWN, total - covered);
+  }
   const sorted = [...shares.entries()].sort((a, b) => b[1] - a[1]);
   if (sorted.length <= 1) {
-    pieces.push({ adm0: g.adm0, name: g.name, owner: sorted[0]?.[0] || null, feature: geom, area: total });
+    pieces.push({ adm0: g.adm0, name: g.name, owner: ownerOrNull(sorted[0]?.[0]), feature: geom, area: total });
     continue;
   }
   const [dominant] = sorted[0];
-  const minors = sorted.slice(1).filter(([, a]) => a / total >= 0.08 && a >= 1500);
+  const keepSmall = scenario.KEEP_SMALL_OWNERS ?? [];
+  const minors = sorted.slice(1).filter(([o, a]) => (a / total >= 0.08 && a >= 1500) || (keepSmall.includes(o) && a >= 300));
   if (!minors.length) {
-    pieces.push({ adm0: g.adm0, name: g.name, owner: dominant, feature: geom, area: total });
+    pieces.push({ adm0: g.adm0, name: g.name, owner: ownerOrNull(dominant), feature: geom, area: total });
     continue;
   }
   let rest = geom;
   const out = [];
   for (const [owner] of minors) {
+    // Uncovered land has no polygon of its own: it stays in the remainder.
+    if (owner === UNKNOWN) continue;
     const part = unionAll(parts.get(owner));
     const diff = safe(() => turf.difference(turf.featureCollection([rest, part])));
     if (!diff) continue;
     rest = diff;
     out.push({ owner, feature: part });
   }
-  out.unshift({ owner: dominant, feature: rest });
+  out.unshift({ owner: ownerOrNull(dominant), feature: rest });
   const center = turf.centroid(geom).geometry.coordinates;
   for (const o of out) {
     const c = turf.centroid(o.feature).geometry.coordinates;
@@ -298,45 +189,9 @@ for (const g of pieces.length ? [] : groups) {
 
 fs.writeFileSync(CACHE, JSON.stringify(pieces));
 
-// Post-overlay corrections by province name (Russian), then historical names.
-const POST_OWNER = {
-  "Территория Бельфор": "FRA", "Мозель (восток)": "GER", "Мозель (запад)": "GER", "Мозель": "GER",
-  "Занзибар Центрально-Южный": "GBR", "Пемба Южная": "GBR", "Занзибар Северный": "GBR",
-  "Пемба Северная": "GBR", "Занзибар Западный": "GBR",
-};
-const RENAME = {
-  "Нижняя Саксония": "Ганновер", "Северный Рейн-Вестфалия": "Рейнская провинция и Вестфалия",
-  "Великопольское воеводство (запад)": "Познань", "Варминско-Мазурское воеводство": "Восточная Пруссия (Алленштайн)",
-  "Калининградская область": "Восточная Пруссия (Кёнигсберг)", "Западно-Поморское воеводство": "Померания (Штеттин)",
-  "Нижнесилезское воеводство": "Силезия (Бреслау)", "Поморское воеводство": "Западная Пруссия (Данциг)",
-  "Любушское воеводство": "Бранденбург (Франкфурт-на-Одере)", "Куявско-Поморское воеводство (запад)": "Западная Пруссия (Бромберг)",
-  "Опольское воеводство": "Верхняя Силезия (Оппельн)", "Силезское воеводство (запад)": "Верхняя Силезия (Каттовиц)",
-  "Нижний Рейн": "Эльзас (Страсбург)", "Верхний Рейн": "Эльзас (Кольмар)", "Мозель (восток)": "Лотарингия (Мец)",
-  "Мозель (запад)": "Лотарингия (Тионвиль)", "Мозель": "Лотарингия (Мец)", "Клайпедский уезд (юг)": "Мемельский край",
-  "Мекленбург-Передняя Померания": "Мекленбург и Передняя Померания", "Саксония-Анхальт": "Провинция Саксония и Анхальт",
-  "Рейнланд-Пфальц": "Пфальц и Рейнгессен", "Баден-Вюртемберг": "Баден и Вюртемберг", "Тюрингия": "Тюрингские государства",
-  "Шлезвиг-Гольштейн": "Шлезвиг-Гольштейн", "Саар": "Саарская область",
-  "Ленинградская область": "Санкт-Петербургская губерния", "Кировская область": "Вятская губерния",
-  "Ульяновская область": "Симбирская губерния", "Свердловская область": "Пермская губерния (Екатеринбург)",
-  "Пермский край": "Пермская губерния", "Волгоградская область": "Саратовская губерния (Царицын)",
-  "Нижегородская область": "Нижегородская губерния", "Самарская область": "Самарская губерния",
-  "Калужская область": "Калужская губерния", "Тверская область": "Тверская губерния", "Московская область": "Московская губерния",
-  "Москва": "Москва", "Санкт-Петербург": "Санкт-Петербург", "Стамбул": "Константинополь",
-  "Северная Осетия": "Терская область (Владикавказ)", "Чечня": "Терская область (Грозный)",
-};
-// British dominions are separate countries; Papua is administered by Australia (since 1906).
-const DOMINIONS = { CAN: "CAN", AUS: "AUS", NZL: "NZL", ZAF: "SAF" };
-for (const p of pieces) {
-  if (DOMINIONS[p.adm0] && p.owner === "GBR") p.owner = DOMINIONS[p.adm0];
-  if (p.adm0 === "CAN" && p.name === "Ньюфаундленд и Лабрадор") p.owner = "NFL";
-  if (p.adm0 === "PNG" && p.owner === "GBR") p.owner = "AUS";
-}
-for (const p of pieces) {
-  if (POST_OWNER[p.name]) p.owner = POST_OWNER[p.name];
-  if (RENAME[p.name]) p.name = RENAME[p.name];
-}
+scenario.post(pieces);
 
-// Owners for provinces that did not touch any 1914 polygon: majority of the same modern country.
+// Owners for provinces that did not touch any basemap polygon: majority of the same modern country.
 const majority = new Map();
 for (const p of pieces) {
   if (!p.owner) continue;
@@ -348,7 +203,8 @@ const orphans = [];
 for (const p of pieces) {
   if (p.owner) continue;
   const m = majority.get(p.adm0);
-  if (m) p.owner = [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  if (scenario.ADM0_FALLBACK?.[p.adm0]) p.owner = scenario.ADM0_FALLBACK[p.adm0];
+  else if (m) p.owner = [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
   else orphans.push(p.adm0 + ":" + p.name);
 }
 if (orphans.length) console.warn("no owner (left neutral):", orphans.join(", "));
@@ -359,7 +215,20 @@ const pathGen = geoPath(projection);
 
 // d3-geo wants clockwise exterior rings (GeoJSON/turf use counter-clockwise);
 // otherwise a polygon is read as "the whole globe except this shape".
-const forD3 = (f) => turf.rewind(f, { reverse: true });
+const forD3 = (f) => dropInverted(turf.rewind(f, { reverse: true }));
+
+// Overlay cuts can leave degenerate slivers (collinear points) that d3 reads as
+// a polygon covering the whole globe; drop such parts.
+function dropInverted(f) {
+  const parts = [];
+  let dropped = false;
+  turf.flattenEach(f, (poly) => {
+    if (geoArea(poly) > 2 * Math.PI) dropped = true;
+    else parts.push(poly.geometry.coordinates);
+  });
+  if (!dropped) return f;
+  return turf.feature({ type: "MultiPolygon", coordinates: parts }, f.properties ?? {});
+}
 
 // Use d3's own geoStream through geoPath context to get correctly clipped polygons.
 function projectedRings(feature) {
@@ -484,8 +353,7 @@ const out = {
   regions: meta,
   cities,
   projection: { type: "miller", rotate: projection.rotate(), scale: projection.scale(), translate: projection.translate() },
-  source:
-    "Borders: aourednik/historical-basemaps (world_1914, GPL-3.0) adjusted to 1911; provinces: Natural Earth admin-1 (public domain).",
+  source: scenario.source,
 };
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(out));

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:map": "node scripts/build-map.mjs",
+    "build:map": "node scripts/build-map.mjs 1911 && node scripts/build-map.mjs 1935",
     "typecheck": "tsc -b",
     "dev:worker": "wrangler dev -c wrangler.local.json",
     "deploy": "npm run build && npm run deploy:ci",

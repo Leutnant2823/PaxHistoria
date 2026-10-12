@@ -9,7 +9,8 @@ import type {
   RelationStatus,
   Settings,
 } from "./types";
-import { ARMIES, COUNTRIES, RELATIONS, SCENARIO_ID, START_DATE } from "./scenario1911";
+import type { Scenario } from "./types";
+import { getScenario } from "./scenarios";
 
 // ---------------------------------------------------------------------------
 // Basic queries
@@ -46,6 +47,7 @@ export const RELATION_LABEL: Record<RelationStatus, string> = {
   rival: "соперничество",
   truce: "перемирие",
   dominion: "доминион и метрополия",
+  puppet: "зависимое государство",
 };
 
 // ---------------------------------------------------------------------------
@@ -61,11 +63,11 @@ export function defaultSettings(): Settings {
   };
 }
 
-export function newGame(map: MapData, player: string, name: string, settings: Settings): GameState {
+export function newGame(map: MapData, scenario: Scenario, player: string, name: string, settings: Settings): GameState {
   const countries: Record<string, Country> = {};
-  for (const [id, seed] of Object.entries(COUNTRIES)) countries[id] = { id, alive: true, ...seed };
+  for (const [id, seed] of Object.entries(scenario.countries)) countries[id] = { id, alive: true, ...seed };
   const cityRegion = new Map(map.cities.map((c) => [c.n, c.r]));
-  const armies: Army[] = ARMIES.flatMap((a, i) => {
+  const armies: Army[] = scenario.armies.flatMap((a, i) => {
     const region = cityRegion.get(a.city);
     return region ? [{ id: `a${i + 1}`, owner: a.owner, name: a.name, region, size: a.size, kind: a.kind }] : [];
   });
@@ -73,14 +75,14 @@ export function newGame(map: MapData, player: string, name: string, settings: Se
     version: 1,
     id: crypto.randomUUID(),
     name,
-    scenario: SCENARIO_ID,
+    scenario: scenario.id,
     player,
-    date: START_DATE,
+    date: scenario.startDate,
     turn: 1,
     settings,
     countries,
     owners: {},
-    relations: RELATIONS.map((r) => ({ ...r })),
+    relations: scenario.relations.map((r) => ({ ...r })),
     armies,
     events: [],
     turns: [],
@@ -99,11 +101,12 @@ export function newGame(map: MapData, player: string, name: string, settings: Se
  * scenario later (e.g. the British dominions) and their starting relations.
  */
 export function migrateState(state: GameState): GameState {
-  const missing = Object.keys(COUNTRIES).filter((id) => !state.countries[id]);
+  const scenario = getScenario(state.scenario);
+  const missing = Object.keys(scenario.countries).filter((id) => !state.countries[id]);
   if (!missing.length) return state;
   const next = structuredClone(state);
-  for (const id of missing) next.countries[id] = { id, alive: true, ...COUNTRIES[id] };
-  for (const r of RELATIONS) {
+  for (const id of missing) next.countries[id] = { id, alive: true, ...scenario.countries[id] };
+  for (const r of scenario.relations) {
     if ((missing.includes(r.a) || missing.includes(r.b)) && !relationOf(next, r.a, r.b)) next.relations.push({ ...r });
   }
   return next;

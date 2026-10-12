@@ -5,6 +5,7 @@ import type { Chat, Change, EventKind, GameEvent, GameState, PromptKey } from ".
 import { addDays, addMonths, countryName, formatDate, isValidDate, relationOf, RELATION_LABEL } from "./engine";
 import { chatTranscript, countryLine, fullContext, relationsText, worldOverview } from "./context";
 import { DIFFICULTY_TEXT, fill, promptFor } from "./prompts";
+import { getScenario } from "./scenarios";
 
 export const MODEL_PRESETS: Record<ProviderId, { id: string; label: string }[]> = {
   anthropic: [
@@ -45,6 +46,7 @@ function baseVars(state: GameState, extra: Record<string, string> = {}): Record<
     PLAYER: `${countryName(state, state.player)} (${state.player})`,
     DATE: formatDate(state.date),
     DIFFICULTY: DIFFICULTY_TEXT[state.settings.difficulty],
+    SCENARIO_START: formatDate(getScenario(state.scenario).startDate),
     ...extra,
   };
 }
@@ -106,7 +108,7 @@ const CHANGE_SCHEMA = {
     country: { type: "string" },
     a: { type: "string" },
     b: { type: "string" },
-    status: { type: "string", enum: ["war", "alliance", "entente", "rival", "truce", "dominion", "neutral"] },
+    status: { type: "string", enum: ["war", "alliance", "entente", "rival", "truce", "dominion", "puppet", "neutral"] },
     name: { type: "string" },
     color: { type: "string" },
     leader: { type: "string" },

@@ -1,4 +1,4 @@
-import type { Country, Relation } from "./types";
+import type { ArmySeed, CountrySeed, Relation, Scenario } from "./types";
 
 // Scenario "1911": the world on 1 January 1911.
 
@@ -6,7 +6,6 @@ export const SCENARIO_ID = "1911";
 export const START_DATE = "1911-01-01";
 export const DEFAULT_PLAYER = "GER";
 
-type CountrySeed = Omit<Country, "id" | "alive">;
 
 const C = (
   name: string,
@@ -220,14 +219,6 @@ export const RELATIONS: Relation[] = [
   R("PRU", "CHL", "rival", "Такна и Арика"),
 ];
 
-export interface ArmySeed {
-  owner: string;
-  name: string;
-  city: string;
-  size: number;
-  kind: "army" | "fleet";
-}
-
 // Peacetime dispositions; size: thousands of men (armies) or capital ships (fleets).
 export const ARMIES: ArmySeed[] = [
   { owner: "GER", name: "Гвардейский корпус", city: "Берлин", size: 45, kind: "army" },
@@ -307,4 +298,18 @@ export const SHORT_NAMES: Record<string, string> = {
   GRE: "Греция", SER: "Сербия", MNT: "Черног.", BUL: "Болгария", ROM: "Румыния", CRT: "Крит", PER: "Персия",
   AFG: "Афганистан", SIA: "Сиам", NEP: "Непал", BHU: "Бутан", ETH: "Эфиопия", LBR: "Либерия", MOR: "Марокко",
   NEJ: "Неджд", KUW: "Кувейт", CAN: "Канада", AUS: "Австралия", NZL: "Н. Зеландия", SAF: "ЮАС", NFL: "Ньюфаундленд", ESA: "Сальвадор", DOM: "Доминик. Р.",
+};
+
+export const SCENARIO_1911: Scenario = {
+  id: SCENARIO_ID,
+  title: "Мир накануне бури",
+  year: "1911",
+  startDate: START_DATE,
+  defaultPlayer: DEFAULT_PLAYER,
+  intro: INTRO,
+  map: "/data/map1911.json",
+  countries: COUNTRIES,
+  relations: RELATIONS,
+  armies: ARMIES,
+  shortNames: SHORT_NAMES,
 };

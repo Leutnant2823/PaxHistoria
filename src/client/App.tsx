@@ -1,19 +1,32 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ServerConfig } from "../shared/api";
 import { api, ApiError } from "./api";
 import { loadMap, type MapData } from "./game/mapdata";
 import type { GameState } from "./game/types";
+import { getScenario } from "./game/scenarios";
 import { Login } from "./screens/Login";
 import { Menu } from "./screens/Menu";
 import { Game } from "./screens/Game";
 
-type Screen = { kind: "loading" } | { kind: "login" } | { kind: "menu" } | { kind: "game"; game: GameState };
+type Screen = { kind: "loading" } | { kind: "login" } | { kind: "menu" } | { kind: "game"; game: GameState; map: MapData };
 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ kind: "loading" });
   const [config, setConfig] = useState<ServerConfig | null>(null);
-  const [map, setMap] = useState<MapData | null>(null);
-  const [mapError, setMapError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const maps = useRef(new Map<string, Promise<MapData>>());
+
+  /** Each scenario has its own province map; it is downloaded once and cached. */
+  const getMap = useCallback((scenarioId: string) => {
+    const url = getScenario(scenarioId).map;
+    let p = maps.current.get(url);
+    if (!p) {
+      p = loadMap(url);
+      p.catch(() => maps.current.delete(url));
+      maps.current.set(url, p);
+    }
+    return p;
+  }, []);
 
   const enter = useCallback(async () => {
     try {
@@ -21,7 +34,7 @@ export function App() {
       setScreen({ kind: "menu" });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setScreen({ kind: "login" });
-      else setMapError((e as Error).message);
+      else setError((e as Error).message);
     }
   }, []);
 
@@ -29,24 +42,20 @@ export function App() {
     enter();
   }, [enter]);
 
-  useEffect(() => {
-    if (screen.kind === "menu" && !map) loadMap().then(setMap, (e) => setMapError(e.message));
-  }, [screen.kind, map]);
-
-  if (mapError) return <div className="center-screen error-text">Ошибка: {mapError}</div>;
+  if (error) return <div className="center-screen error-text">Ошибка: {error}</div>;
   if (screen.kind === "loading") return <div className="center-screen muted">Загрузка...</div>;
   if (screen.kind === "login") return <Login onLogin={enter} />;
-  if (screen.kind === "menu" || !map || !config)
+  if (screen.kind === "menu" || !config)
     return (
       <Menu
-        map={map}
         config={config}
-        onOpen={(game) => setScreen({ kind: "game", game })}
+        getMap={getMap}
+        onOpen={(game, map) => setScreen({ kind: "game", game, map })}
         onLogout={async () => {
           await api.logout().catch(() => undefined);
           setScreen({ kind: "login" });
         }}
       />
     );
-  return <Game initial={screen.game} map={map} config={config} onExit={() => setScreen({ kind: "menu" })} />;
+  return <Game initial={screen.game} map={screen.map} config={config} onExit={() => setScreen({ kind: "menu" })} />;
 }

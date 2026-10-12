@@ -14,7 +14,7 @@ import { CountryCard } from "../components/CountryCard";
 import { JumpDialog, JumpOverlay, type JumpPhase } from "../components/Jump";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { TimelineDialog } from "../components/TimelineDialog";
-import { INTRO } from "../game/scenario1911";
+import { getScenario } from "../game/scenarios";
 
 interface Props {
   initial: GameState;
@@ -268,6 +268,7 @@ export function Game({ initial, map, config, onExit }: Props) {
   }, [notice]);
 
   const player = view.countries[view.player];
+  const scenario = getScenario(view.scenario);
   const armyHint = selectedArmy ? view.armies.find((a) => a.id === selectedArmy) : null;
 
   return (
@@ -371,8 +372,10 @@ export function Game({ initial, map, config, onExit }: Props) {
       {dialog === "intro" && (
         <div className="modal-backdrop" onClick={() => setDialog(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{player?.name}, 1 января 1911 года</h2>
-            <p>{INTRO}</p>
+            <h2>
+              {player?.name}, {formatDate(scenario.startDate)}
+            </h2>
+            <p>{scenario.intro}</p>
             <p className="muted small">{player?.description}</p>
             <ol className="small">
               <li>Пишите приказы своими словами на панели «Действия» справа внизу.</li>

@@ -7,7 +7,7 @@ import type { GeometryCollection } from "topojson-specification";
 import type { MapData } from "../game/mapdata";
 import type { GameState, RelationStatus } from "../game/types";
 import { countryName, ownerOf, relationOf } from "../game/engine";
-import { COUNTRIES, SHORT_NAMES } from "../game/scenario1911";
+import { getScenario } from "../game/scenarios";
 
 export type MapMode = "political" | "diplomatic";
 
@@ -29,6 +29,7 @@ const DIPLO_COLORS: Record<RelationStatus | "self" | "none", string> = {
   war: "#c23b2f",
   rival: "#d98c3a",
   truce: "#d8c35a",
+  puppet: "#9a7fc0",
   dominion: "#7fb6a0",
   none: "#b9b2a2",
 };
@@ -114,6 +115,7 @@ function computeLabels(map: MapData, state: GameState, owners: Record<string, st
     comps.push({ owner, start, area, x, y, w: Math.max(maxX - minX, side * 0.7), h: Math.max(maxY - minY, side * 0.45) });
   }
   comps.sort((a, b) => b.area - a.area);
+  const scenario = getScenario(state.scenario);
   const kept: typeof comps = [];
   for (const c of comps) {
     if (kept.some((k) => k.owner === c.owner && Math.hypot(k.x - c.x, k.y - c.y) < 220)) continue;
@@ -121,7 +123,7 @@ function computeLabels(map: MapData, state: GameState, owners: Record<string, st
   }
   return kept.map((c) => {
     const country = state.countries[c.owner];
-    const text = (country && COUNTRIES[c.owner]?.name === country.name ? SHORT_NAMES[c.owner] : undefined) ?? countryName(state, c.owner);
+    const text = (country && scenario.countries[c.owner]?.name === country.name ? scenario.shortNames[c.owner] : undefined) ?? countryName(state, c.owner);
     const size = Math.max(1.5, Math.min(60, (c.w * 0.8) / (text.length * 0.66), c.h * 0.45));
     return { id: `${c.owner}-${c.start}`, text: text.toUpperCase(), x: c.x, y: c.y, size };
   });

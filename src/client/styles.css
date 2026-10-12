@@ -286,6 +286,11 @@ p {
   border-radius: 12px;
   padding: 22px;
 }
+.scenario-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 .scenario-card {
   background: linear-gradient(160deg, rgba(201, 164, 92, 0.15), transparent 50%), var(--panel);
 }
@@ -680,6 +685,9 @@ label.inline input {
 }
 .rel-dominion {
   color: #9fd0bc;
+}
+.rel-puppet {
+  color: #c3a8e6;
 }
 .rel-truce {
   color: #e6d47a;
