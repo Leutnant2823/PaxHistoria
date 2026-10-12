@@ -20,8 +20,6 @@ const OPENAI_COMPAT: Record<"gemini" | "openrouter", { url: string; key: (env: E
 
 /** Free fallback when Gemini's free quota runs out or no Gemini key is set. */
 const WORKERS_AI_FALLBACK = "@cf/meta/llama-4-scout-17b-16e-instruct";
-// Gemini answers 429 on an exhausted quota; 5xx when overloaded.
-const FALLBACK_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 // Server-side refusal fallback ("default" routing) exists for these models.
 const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-opus-5"]);
@@ -122,8 +120,14 @@ export async function handleAi(request: Request, env: Env): Promise<Response> {
             messages: [{ role: "system", content: systemWithSchema(req) }, ...req.messages],
           }),
         });
-        if (!res.ok && canFallback && FALLBACK_STATUSES.has(res.status)) {
-          return streamResponse(await runWorkersAi(env, req, WORKERS_AI_FALLBACK, maxTokens), "workersai", { "x-provider-fallback": "workersai" });
+        // Any Gemini failure (exhausted quota, bad key, unsupported region, overload) falls back
+        // to Workers AI so the game keeps going; the reason travels in a response header.
+        if (!res.ok && canFallback) {
+          const reason = `gemini ${res.status}: ${(await res.text()).slice(0, 200).replace(/[^\x20-\x7e]/g, " ")}`;
+          return streamResponse(await runWorkersAi(env, req, WORKERS_AI_FALLBACK, maxTokens), "workersai", {
+            "x-provider-fallback": "workersai",
+            "x-fallback-reason": reason,
+          });
         }
         if (!res.ok) return errorResponse(res.status, `${req.provider}: ${(await res.text()).slice(0, 600)}`);
         return streamResponse(res.body, "openai");
