@@ -112,7 +112,7 @@ export function Game({ initial, map, config, onExit }: Props) {
     setPhase({ stage: "generating", chars: 0, thinking: true, abort });
     const base = stateRef.current;
     try {
-      const { events: raw, target } = await generateJump(
+      const { events: raw, target, note } = await generateJump(
         base,
         map,
         plan,
@@ -125,6 +125,7 @@ export function Game({ initial, map, config, onExit }: Props) {
       const upto = step ? 1 : raw.length;
       for (let i = 0; i < upto; i++) events[i] = applyEvent(w, map, { ...raw[i], id: newId(w, "e") });
       runRef.current = { plan, base, working: w, target, raw, events };
+      if (note) setNotice(note);
       setWorking(w);
       setPhase({ stage: "playback", events, index: step ? 0 : raw.length - 1, list: !step });
     } catch (e) {

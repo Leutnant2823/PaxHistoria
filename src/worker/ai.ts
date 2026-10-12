@@ -117,6 +117,9 @@ export async function handleAi(request: Request, env: Env): Promise<Response> {
             model: req.model,
             max_tokens: maxTokens,
             stream: true,
+            // Gemini counts its hidden reasoning against max_tokens; with the default budget
+            // long reasoning can leave almost nothing for the answer and cut the JSON short.
+            ...(req.provider === "gemini" ? { reasoning_effort: "low" } : {}),
             messages: [{ role: "system", content: systemWithSchema(req) }, ...req.messages],
           }),
         });
@@ -130,7 +133,7 @@ export async function handleAi(request: Request, env: Env): Promise<Response> {
           });
         }
         if (!res.ok) return errorResponse(res.status, `${req.provider}: ${(await res.text()).slice(0, 600)}`);
-        return streamResponse(res.body, "openai");
+        return streamResponse(res.body, "openai", { "x-ai-provider": req.provider });
       }
 
       case "workersai": {

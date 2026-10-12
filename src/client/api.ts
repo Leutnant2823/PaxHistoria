@@ -83,25 +83,49 @@ export interface AiProgress {
 }
 
 /** Extracts the text delta from one SSE data payload of the given format. */
-function deltaOf(format: StreamFormat, data: unknown): { text?: string; thinking?: boolean; error?: string; refusal?: boolean } {
+interface Delta {
+  text?: string;
+  thinking?: boolean;
+  error?: string;
+  refusal?: boolean;
+  /** the model stopped because it hit the output length limit */
+  truncated?: boolean;
+}
+
+function deltaOf(format: StreamFormat, data: unknown): Delta {
   const d = data as Record<string, any>;
   if (format === "anthropic") {
     if (d.type === "content_block_delta" && d.delta?.type === "text_delta") return { text: d.delta.text };
     if (d.type === "content_block_start" && d.content_block?.type === "thinking") return { thinking: true };
     if (d.type === "error") return { error: d.error?.message ?? "ошибка провайдера" };
     if (d.type === "message_delta" && d.delta?.stop_reason === "refusal") return { refusal: true };
+    if (d.type === "message_delta" && d.delta?.stop_reason === "max_tokens") return { truncated: true };
     return {};
   }
   if (format === "openai") {
     if (d.error) return { error: d.error.message ?? String(d.error) };
-    return { text: d.choices?.[0]?.delta?.content ?? "" };
+    const choice = d.choices?.[0];
+    return { text: choice?.delta?.content ?? "", truncated: choice?.finish_reason === "length" };
   }
   // workersai: {"response": "..."} or OpenAI-style chunks from newer models
   if (typeof d.response === "string") return { text: d.response };
   return { text: d.choices?.[0]?.delta?.content ?? "" };
 }
 
+export interface AiResult {
+  text: string;
+  truncated: boolean;
+  /** "gemini", "workersai", ... : who actually answered */
+  provider: string;
+  /** why the Worker switched to the free fallback model, if it did */
+  fallbackReason: string | null;
+}
+
 export async function callAi(req: AiRequest, onProgress?: (p: AiProgress) => void, signal?: AbortSignal): Promise<string> {
+  return (await callAiDetailed(req, onProgress, signal)).text;
+}
+
+export async function callAiDetailed(req: AiRequest, onProgress?: (p: AiProgress) => void, signal?: AbortSignal): Promise<AiResult> {
   const res = await request("/api/ai", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -114,6 +138,7 @@ export async function callAi(req: AiRequest, onProgress?: (p: AiProgress) => voi
   let text = "";
   let thinking = false;
   let refusal = false;
+  let truncated = false;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -134,6 +159,7 @@ export async function callAi(req: AiRequest, onProgress?: (p: AiProgress) => voi
       const delta = deltaOf(format, data);
       if (delta.error) throw new ApiError(delta.error, 502);
       if (delta.refusal) refusal = true;
+      if (delta.truncated) truncated = true;
       if (delta.thinking) thinking = true;
       if (delta.text) {
         text += delta.text;
@@ -143,7 +169,53 @@ export async function callAi(req: AiRequest, onProgress?: (p: AiProgress) => voi
     }
   }
   if (refusal && !text.trim()) throw new ApiError("Модель отказалась отвечать на этот запрос. Попробуйте переформулировать.", 422);
-  return text;
+  const fallback = res.headers.get("x-provider-fallback");
+  return {
+    text,
+    truncated,
+    provider: fallback ?? res.headers.get("x-ai-provider") ?? req.provider,
+    fallbackReason: fallback ? res.headers.get("x-fallback-reason") ?? "ключ Gemini не задан" : null,
+  };
+}
+
+/**
+ * Recovers the complete events from a jump answer that was cut off mid-way:
+ * keeps every event object that was closed and drops the unfinished tail.
+ */
+export function salvageEvents(text: string): unknown[] {
+  const start = text.indexOf("[");
+  if (start < 0) return [];
+  const events: unknown[] = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let objStart = -1;
+  for (let i = start + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") {
+      if (depth === 0 && ch === "{") objStart = i;
+      depth++;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth < 0) break;
+      if (depth === 0 && ch === "}" && objStart >= 0) {
+        try {
+          events.push(JSON.parse(text.slice(objStart, i + 1)));
+        } catch {
+          /* skip a malformed event */
+        }
+        objStart = -1;
+      }
+    }
+  }
+  return events;
 }
 
 /** Parses JSON from a model answer, tolerating code fences and surrounding text. */

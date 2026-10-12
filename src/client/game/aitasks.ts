@@ -1,5 +1,5 @@
 import type { AiMessage, AiRequest, ProviderId } from "../../shared/api";
-import { callAi, parseJson, type AiProgress } from "../api";
+import { callAi, callAiDetailed, parseJson, salvageEvents, type AiProgress, type AiResult } from "../api";
 import type { MapData } from "./mapdata";
 import type { Chat, Change, EventKind, GameEvent, GameState, PromptKey } from "./types";
 import { addDays, addMonths, countryName, formatDate, isValidDate, relationOf, RELATION_LABEL } from "./engine";
@@ -159,7 +159,7 @@ export async function generateJump(
   plan: JumpPlan,
   onProgress?: Progress,
   signal?: AbortSignal,
-): Promise<{ events: GameEvent[]; target: string }> {
+): Promise<{ events: GameEvent[]; target: string; note: string | null }> {
   const target = jumpTarget(state.date, plan);
   const days = Math.round((Date.parse(target) - Date.parse(state.date)) / 86400000);
   const key: PromptKey = plan.mode === "auto" ? "jump_auto" : "jump";
@@ -179,21 +179,37 @@ ${actions}${cheat}
 ПЕРИОД: с ${state.date} по ${target}.
 ЦЕЛЕВАЯ ДАТА: ${target}`;
 
-  const maxTokens = days > 100 ? 24000 : 14000;
+  const maxTokens = days > 100 ? 32000 : 20000;
   const request = ai(state, "jump", sys, [{ role: "user", content: user }], { maxTokens, schema: JUMP_SCHEMA });
-  // Free models sometimes break the JSON; one silent retry fixes most of those cases.
+  // Free models sometimes break or cut off the JSON: complete events are salvaged
+  // from a cut-off answer, and one silent retry covers the rest.
   let events: GameEvent[] = [];
+  let result: AiResult | null = null;
   for (let attempt = 0; attempt < 2 && !events.length; attempt++) {
-    const text = await callAi(request, onProgress, signal);
+    result = await callAiDetailed(request, onProgress, signal);
+    let raw: unknown[];
     try {
-      const parsed = parseJson<{ events?: unknown[] } | unknown[]>(text);
-      events = sanitizeEvents(state, Array.isArray(parsed) ? parsed : parsed.events ?? [], target);
-    } catch (e) {
-      if (attempt === 1) throw e;
+      const parsed = parseJson<{ events?: unknown[] } | unknown[]>(result.text);
+      raw = Array.isArray(parsed) ? parsed : parsed.events ?? [];
+    } catch {
+      raw = salvageEvents(result.text);
     }
+    events = sanitizeEvents(state, raw, target);
   }
-  if (!events.length) throw new Error("ИИ не вернул ни одного события. Попробуйте ещё раз.");
-  return { events, target: plan.mode === "auto" ? events[events.length - 1].date : target };
+  const who = result ? PROVIDER_LABEL[result.provider as ProviderId] ?? result.provider : "";
+  const fallbackNote = result?.fallbackReason ? ` Gemini не ответил (${result.fallbackReason.slice(0, 120)}), поэтому работал резервный ИИ Cloudflare.` : "";
+  if (!events.length) {
+    const why = result?.truncated ? "ответ оборвался, не дойдя до первого события" : "ответ пришёл не в нужном формате";
+    throw new Error(`ИИ (${who}) не смог описать события: ${why}. Попробуйте ещё раз или выберите период короче.${fallbackNote}`);
+  }
+  const notes: string[] = [];
+  if (result?.truncated) notes.push(`Ответ ИИ оборвался, показаны события, которые он успел описать (${events.length}).`);
+  if (fallbackNote) notes.push(fallbackNote.trim());
+  return {
+    events,
+    target: plan.mode === "auto" || result?.truncated ? events[events.length - 1].date : target,
+    note: notes.length ? notes.join(" ") : null,
+  };
 }
 
 function sanitizeEvents(state: GameState, raw: unknown[], target: string): GameEvent[] {
