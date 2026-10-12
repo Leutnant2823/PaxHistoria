@@ -1,0 +1,7 @@
+AUTH_USER=your-login
+AUTH_PASSWORD=your-password
+# Any of these; MOCK_AI=1 enables offline test answers.
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+OPENROUTER_API_KEY=
+MOCK_AI=1

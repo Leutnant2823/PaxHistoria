@@ -8,9 +8,10 @@
     "build": "tsc -b && vite build",
     "build:map": "node scripts/build-map.mjs",
     "typecheck": "tsc -b",
-    "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply strategia-db --local",
+    "dev:worker": "wrangler dev -c wrangler.local.json",
+    "deploy": "npm run build && npm run deploy:ci",
+    "deploy:ci": "wrangler deploy && wrangler d1 migrations apply strategia-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply strategia-db --local -c wrangler.local.json",
     "db:migrate:remote": "wrangler d1 migrations apply strategia-db --remote"
   },
   "dependencies": {
